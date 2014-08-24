@@ -117,7 +117,7 @@ public class VolumePanel extends Handler implements OnSeekBarChangeListener, Vie
     public static final int VOLUME_OVERLAY_EXPANDED = 2;
     public static final int VOLUME_OVERLAY_NONE = 3;
 
-    private static final int TRANSLUCENT_START_LEVEL = 160;
+    private static final int TRANSLUCENT_START_LEVEL = 208;
     private static final int TRANSLUCENT_TO_OPAQUE_DURATION = 400;
 
     protected Context mContext;
@@ -348,7 +348,6 @@ public class VolumePanel extends Handler implements OnSeekBarChangeListener, Vie
         lp.type = LayoutParams.TYPE_VOLUME_OVERLAY;
         lp.width = LayoutParams.WRAP_CONTENT;
         lp.height = LayoutParams.WRAP_CONTENT;
-        lp.privateFlags |= LayoutParams.PRIVATE_FLAG_FORCE_SHOW_NAV_BAR;
         window.setAttributes(lp);
         window.addFlags(LayoutParams.FLAG_NOT_FOCUSABLE | LayoutParams.FLAG_NOT_TOUCH_MODAL
                 | LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH);
@@ -416,20 +415,26 @@ public class VolumePanel extends Handler implements OnSeekBarChangeListener, Vie
                 mMoreButton.setVisibility(View.GONE);
                 mDivider.setVisibility(View.GONE);
                 mShowCombinedVolumes = false;
+                if (mCurrentOverlayStyle != -1) {
+                    reorderSliders(mActiveStreamType);
+                }
                 mCurrentOverlayStyle = VOLUME_OVERLAY_SINGLE;
                 break;
             case VOLUME_OVERLAY_EXPANDABLE :
                 mMoreButton.setVisibility(View.VISIBLE);
                 mDivider.setVisibility(View.VISIBLE);
                 mShowCombinedVolumes = true;
+                if (mCurrentOverlayStyle != -1) {
+                    reorderSliders(mActiveStreamType);
+                }
                 mCurrentOverlayStyle = VOLUME_OVERLAY_EXPANDABLE;
                 break;
             case VOLUME_OVERLAY_EXPANDED :
                 mMoreButton.setVisibility(View.GONE);
                 mDivider.setVisibility(View.GONE);
                 mShowCombinedVolumes = true;
-                if (mCurrentOverlayStyle == VOLUME_OVERLAY_NONE) {
-                    addOtherVolumes();
+                if (mCurrentOverlayStyle != -1) {
+                    reorderSliders(mActiveStreamType);
                     expand();
                 }
                 mCurrentOverlayStyle = VOLUME_OVERLAY_EXPANDED;
@@ -511,6 +516,11 @@ public class VolumePanel extends Handler implements OnSeekBarChangeListener, Vie
     }
 
     private void reorderSliders(int activeStreamType) {
+        synchronized (this) {
+            if (mStreamControls == null) {
+                createSliders();
+            }
+        }
         mSliderGroup.removeAllViews();
 
         StreamControl active = mStreamControls.get(activeStreamType);
@@ -994,7 +1004,7 @@ public class VolumePanel extends Handler implements OnSeekBarChangeListener, Vie
 
                 sConfirmSafeVolumeDialog.setOnDismissListener(warning);
                 sConfirmSafeVolumeDialog.getWindow().setType(
-                                                WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
+                                                WindowManager.LayoutParams.TYPE_VOLUME_OVERLAY);
                 sConfirmSafeVolumeDialog.show();
             }
             updateStates();
@@ -1171,17 +1181,21 @@ public class VolumePanel extends Handler implements OnSeekBarChangeListener, Vie
     }
 
     public void onClick(View v) {
-        if (mTranslucentDialog && mShouldRunDropTranslucentAnimation) {
-            startRemoveTranslucentAnimation();
-        }
-        if (v == mMoreButton) {
-            expand();
-        } else if (v instanceof ImageView) {
+        boolean moreButton = v == mMoreButton;
+        if (v instanceof ImageView && !moreButton) {
             Intent volumeSettings = new Intent(android.provider.Settings.ACTION_SOUND_SETTINGS);
-            volumeSettings.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            volumeSettings.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             forceTimeout();
             mContext.startActivity(volumeSettings);
             return;
+        }
+
+        if (mTranslucentDialog && mShouldRunDropTranslucentAnimation) {
+            startRemoveTranslucentAnimation();
+        }
+        if (moreButton) {
+            expand();
         }
         resetTimeout();
     }

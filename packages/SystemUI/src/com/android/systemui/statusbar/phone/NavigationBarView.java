@@ -25,18 +25,25 @@ import android.app.ActivityManagerNative;
 import android.app.StatusBarManager;
 import android.app.admin.DevicePolicyManager;
 import android.content.BroadcastReceiver;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.database.ContentObserver;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.os.RemoteException;
 import android.os.UserHandle;
+import android.provider.Settings;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.Display;
@@ -94,12 +101,25 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
     int mDisabledFlags = 0;
     int mNavigationIconHints = 0;
 
-    private Drawable mBackIcon, mBackLandIcon, mBackAltIcon, mBackAltLandIcon,
-            mRecentIcon, mRecentLandIcon, mRecentAltIcon, mRecentAltLandIcon;
+    private Drawable mBackIcon, mBackLandIcon, mBackAltIcon, mBackAltLandIcon;
+    private Drawable mRecentIcon;
+    private Drawable mRecentLandIcon;
+    private Drawable mHomeIcon, mHomeLandIcon;
 
     private DelegateViewHelper mDelegateHelper;
     private DeadZone mDeadZone;
     private final NavigationBarTransitions mBarTransitions;
+
+    private boolean mHasCmKeyguard = false;
+    private boolean mModLockDisabled = true;
+    private boolean mShowDpadArrowKeys = true;
+    private SettingsObserver mObserver;
+
+    // Visibility of R.id.one view prior to swapping it for a left arrow key
+    public int mSlotOneVisibility = -1;
+
+    // Visibility of R.id.six view prior to swapping it for a right arrow key
+    public int mSlotSixVisibility = -1;
 
     // workaround for LayoutTransitions leaving the nav buttons in a weird state (bug 5549288)
     final static boolean WORKAROUND_INVALID_LAYOUT = true;
@@ -111,6 +131,8 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
     // performs manual animation in sync with layout transitions
     private final NavTransitionListener mTransitionListener = new NavTransitionListener();
 
+    private Resources mThemedResources;
+
     private class NavTransitionListener implements TransitionListener {
         private boolean mBackTransitioning;
         private boolean mHomeAppearing;
@@ -121,9 +143,9 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
         @Override
         public void startTransition(LayoutTransition transition, ViewGroup container,
                 View view, int transitionType) {
-            if (view == findViewWithTag(NavbarEditor.NAVBAR_BACK)) {
+            if (view == findButton(NavbarEditor.NAVBAR_BACK)) {
                 mBackTransitioning = true;
-            } else if (view ==  findViewWithTag(NavbarEditor.NAVBAR_HOME)
+            } else if (view ==  findButton(NavbarEditor.NAVBAR_HOME)
                     && transitionType == LayoutTransition.APPEARING) {
                 mHomeAppearing = true;
                 mStartDelay = transition.getStartDelay(transitionType);
@@ -135,9 +157,9 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
         @Override
         public void endTransition(LayoutTransition transition, ViewGroup container,
                 View view, int transitionType) {
-            if (view == findViewWithTag(NavbarEditor.NAVBAR_BACK)) {
+            if (view == findButton(NavbarEditor.NAVBAR_BACK)) {
                 mBackTransitioning = false;
-            } else if (view ==  findViewWithTag(NavbarEditor.NAVBAR_HOME)
+            } else if (view ==  findButton(NavbarEditor.NAVBAR_HOME)
                     && transitionType == LayoutTransition.APPEARING) {
                 mHomeAppearing = false;
             }
@@ -146,11 +168,11 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
         public void onBackAltCleared() {
             // When dismissing ime during unlock, force the back button to run the same appearance
             // animation as home (if we catch this condition early enough).
-            View backView = findViewWithTag(NavbarEditor.NAVBAR_BACK);
-            View homeView = findViewWithTag(NavbarEditor.NAVBAR_HOME);
+            View backView = findButton(NavbarEditor.NAVBAR_BACK);
+            View homeView = findButton(NavbarEditor.NAVBAR_HOME);
             if (!mBackTransitioning && backView != null && backView.getVisibility() == VISIBLE
                     && mHomeAppearing && homeView != null && homeView.getAlpha() == 0) {
-                findViewWithTag(NavbarEditor.NAVBAR_BACK).setAlpha(0);
+                backView.setAlpha(0);
                 ValueAnimator a = ObjectAnimator.ofFloat(backView, "alpha", 0, 1);
                 a.setStartDelay(mStartDelay);
                 a.setDuration(mDuration);
@@ -241,7 +263,15 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
                 new IntentFilter(NAVBAR_EDIT_ACTION), null, null);
 
         mLockUtils = new LockPatternUtils(context);
-    }
+
+        mObserver = new SettingsObserver(new Handler());
+
+        final String keyguardPackage = mContext.getString(
+                com.android.internal.R.string.config_keyguardPackage);
+        final Bundle keyguardMetadata = getApplicationMetadata(mContext, keyguardPackage);
+        mHasCmKeyguard = keyguardMetadata != null &&
+                keyguardMetadata.getBoolean("com.cyanogenmod.keyguard", false);
+     }
 
     private void watchForDevicePolicyChanges() {
         final IntentFilter filter = new IntentFilter();
@@ -318,19 +348,19 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
     }
 
     protected void updateButtonListeners() {
-        View recentView = mCurrentView.findViewWithTag(NavbarEditor.NAVBAR_RECENT);
+        View recentView = findButton(NavbarEditor.NAVBAR_RECENT);
         if (recentView != null) {
             recentView.setOnClickListener(mRecentsClickListener);
             recentView.setOnTouchListener(mRecentsPreloadListener);
         }
-        View homeView = mCurrentView.findViewWithTag(NavbarEditor.NAVBAR_HOME);
+        View homeView = findButton(NavbarEditor.NAVBAR_HOME);
         if (homeView != null) {
             homeView.setOnTouchListener(mHomeSearchActionListener);
         }
     }
 
-    private void setButtonWithTagVisibility(Object tag, boolean visible) {
-        View findView = mCurrentView.findViewWithTag(tag);
+    private void setButtonVisibility(NavbarEditor.ButtonInfo info, boolean visible) {
+        View findView = findButton(info);
         if (findView != null) {
             findView.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
         }
@@ -350,20 +380,69 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
         mBackIcon = res.getDrawable(R.drawable.ic_sysbar_back);
         mBackLandIcon = res.getDrawable(R.drawable.ic_sysbar_back_land);
         mBackAltIcon = res.getDrawable(R.drawable.ic_sysbar_back_ime);
-        mBackAltLandIcon = res.getDrawable(R.drawable.ic_sysbar_back_ime);
+        mBackAltLandIcon = res.getDrawable(R.drawable.ic_sysbar_back_ime_land);
         mRecentIcon = res.getDrawable(R.drawable.ic_sysbar_recent);
         mRecentLandIcon = res.getDrawable(R.drawable.ic_sysbar_recent_land);
-        mRecentAltIcon = res.getDrawable(R.drawable.ic_sysbar_recent_clear);
-        mRecentAltLandIcon = res.getDrawable(R.drawable.ic_sysbar_recent_clear_land);
+        mHomeIcon = res.getDrawable(R.drawable.ic_sysbar_home);
+        mHomeLandIcon = res.getDrawable(R.drawable.ic_sysbar_home_land);
     }
 
-    protected void updateResources() {
-        getIcons(mContext.getResources());
+    public void updateResources(Resources res) {
+        mThemedResources = res;
+        getIcons(mThemedResources);
+        mBarTransitions.updateResources(res);
+        for (int i = 0; i < mRotatedViews.length; i++) {
+            ViewGroup container = (ViewGroup) mRotatedViews[i];
+            if (container != null) {
+                updateKeyButtonViewResources(container);
+                updateLightsOutResources(container);
+            }
+        }
+    }
+
+    private void updateKeyButtonViewResources(ViewGroup container) {
+        ViewGroup midNavButtons = (ViewGroup) container.findViewById(R.id.mid_nav_buttons);
+        if (midNavButtons != null) {
+            final int nChildren = midNavButtons.getChildCount();
+            for (int i = 0; i < nChildren; i++) {
+                final View child = midNavButtons.getChildAt(i);
+                if (child instanceof KeyButtonView) {
+                    ((KeyButtonView) child).updateResources(mThemedResources);
+                }
+            }
+        }
+        KeyButtonView kbv = (KeyButtonView) findViewById(R.id.one);
+        if (kbv != null) {
+            kbv.updateResources(mThemedResources);
+        }
+        kbv = (KeyButtonView) findViewById(R.id.six);
+        if (kbv != null) {
+            kbv.updateResources(mThemedResources);
+        }
+    }
+
+    private void updateLightsOutResources(ViewGroup container) {
+        ViewGroup lightsOut = (ViewGroup) container.findViewById(R.id.lights_out);
+        if (lightsOut != null) {
+            final int nChildren = lightsOut.getChildCount();
+            for (int i = 0; i < nChildren; i++) {
+                final View child = lightsOut.getChildAt(i);
+                if (child instanceof ImageView) {
+                    final ImageView iv = (ImageView) child;
+                    // clear out the existing drawable, this is required since the
+                    // ImageView keeps track of the resource ID and if it is the same
+                    // it will not update the drawable.
+                    iv.setImageDrawable(null);
+                    iv.setImageDrawable(mThemedResources.getDrawable(
+                            R.drawable.ic_sysbar_lights_out_dot_large));
+                }
+            }
+        }
     }
 
     @Override
     public void setLayoutDirection(int layoutDirection) {
-        getIcons(mContext.getResources());
+        if (mThemedResources != null) getIcons(mThemedResources);
 
         super.setLayoutDirection(layoutDirection);
     }
@@ -419,8 +498,9 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
 
         mNavigationIconHints = hints;
 
-        ImageView backView = (ImageView) findViewWithTag(NavbarEditor.NAVBAR_BACK);
-        ImageView recentView = (ImageView) findViewWithTag(NavbarEditor.NAVBAR_RECENT);
+        ImageView backView = (ImageView) findButton(NavbarEditor.NAVBAR_BACK);
+        ImageView recentView = (ImageView) findButton(NavbarEditor.NAVBAR_RECENT);
+        ImageView homeView = (ImageView) findButton(NavbarEditor.NAVBAR_HOME);
 
         if (backView != null) {
             backView.setImageDrawable(
@@ -437,7 +517,35 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
             Log.d(TAG, "recents nav: hints("+hints+"), vertical("+mVertical+")");
         }
 
+        if (homeView != null) {
+            homeView.setImageDrawable(mVertical ? mHomeLandIcon : mHomeIcon);
+        }
+
         setDisabledFlags(mDisabledFlags, true);
+
+        if (mShowDpadArrowKeys) {
+            final boolean showingIme = ((mNavigationIconHints
+                    & StatusBarManager.NAVIGATION_HINT_BACK_ALT) != 0);
+
+            setVisibleOrGone(getCurrentView().findViewById(R.id.dpad_left), showingIme);
+            setVisibleOrGone(getCurrentView().findViewById(R.id.dpad_right), showingIme);
+
+            View one = getCurrentView().findViewById(mVertical ? R.id.six : R.id.one);
+            View six = getCurrentView().findViewById(mVertical ? R.id.one : R.id.six);
+            if (showingIme) {
+                mSlotOneVisibility = one.getVisibility();
+                mSlotSixVisibility = six.getVisibility();
+                setVisibleOrGone(one, false);
+                setVisibleOrGone(six, false);
+            } else {
+                if (mSlotOneVisibility != -1) {
+                    one.setVisibility(mSlotOneVisibility);
+                }
+                if (mSlotSixVisibility != -1) {
+                    six.setVisibility(mSlotSixVisibility);
+                }
+            }
+        }
     }
 
     public int getNavigationIconHints() {
@@ -480,17 +588,19 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
             }
         }
 
-        setButtonWithTagVisibility(NavbarEditor.NAVBAR_BACK, !disableBack);
-        setButtonWithTagVisibility(NavbarEditor.NAVBAR_HOME, !disableHome);
-        setButtonWithTagVisibility(NavbarEditor.NAVBAR_RECENT, !disableRecent);
-        setButtonWithTagVisibility(NavbarEditor.NAVBAR_ALWAYS_MENU, !disableRecent);
-        setButtonWithTagVisibility(NavbarEditor.NAVBAR_MENU_BIG, !disableRecent);
-        setButtonWithTagVisibility(NavbarEditor.NAVBAR_SEARCH, !disableRecent);
+        setButtonVisibility(NavbarEditor.NAVBAR_BACK, !disableBack);
+        setButtonVisibility(NavbarEditor.NAVBAR_HOME, !disableHome);
+        setButtonVisibility(NavbarEditor.NAVBAR_RECENT, !disableRecent);
+        setButtonVisibility(NavbarEditor.NAVBAR_RECENT, !disableRecent);
+        setButtonVisibility(NavbarEditor.NAVBAR_ALWAYS_MENU, !disableRecent);
+        setButtonVisibility(NavbarEditor.NAVBAR_MENU_BIG, !disableRecent);
+        setButtonVisibility(NavbarEditor.NAVBAR_SEARCH, !disableRecent);
 
         final boolean showSearch = disableHome && !disableSearch;
         final boolean showCamera = showSearch && !mCameraDisabledByDpm
                 && mLockUtils.getCameraEnabled();
-        setVisibleOrGone(getSearchLight(), showSearch);
+
+        setVisibleOrGone(getSearchLight(), showSearch && mModLockDisabled);
         setVisibleOrGone(getCameraButton(), showCamera);
 
         mBarTransitions.applyBackButtonQuiescentAlpha(mBarTransitions.getMode(), true /*animate*/);
@@ -545,7 +655,7 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
 
         mShowMenu = show;
 
-        setButtonWithTagVisibility(NavbarEditor.NAVBAR_CONDITIONAL_MENU, mShowMenu);
+        setButtonVisibility(NavbarEditor.NAVBAR_CONDITIONAL_MENU, mShowMenu);
     }
 
     @Override
@@ -555,6 +665,18 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
         mCurrentView = mRotatedViews[mContext.getResources().getConfiguration().orientation];
 
         watchForAccessibilityChanges();
+    }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        mObserver.observe();
+    }
+
+    @Override
+    public void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        mObserver.unobserve();
     }
 
     private void watchForAccessibilityChanges() {
@@ -642,6 +764,10 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
         //}
 
         setNavigationIconHints(mNavigationIconHints, true);
+    }
+
+    View findButton(NavbarEditor.ButtonInfo info) {
+        return mCurrentView.findViewWithTag(info);
     }
 
     @Override
@@ -751,9 +877,9 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
                         mVertical ? "true" : "false",
                         mShowMenu ? "true" : "false"));
 
-        dumpButton(pw, "back", mCurrentView.findViewWithTag(NavbarEditor.NAVBAR_BACK));
-        dumpButton(pw, "home", mCurrentView.findViewWithTag(NavbarEditor.NAVBAR_HOME));
-        dumpButton(pw, "rcnt", mCurrentView.findViewWithTag(NavbarEditor.NAVBAR_RECENT));
+        dumpButton(pw, "back", findButton(NavbarEditor.NAVBAR_BACK));
+        dumpButton(pw, "home", findButton(NavbarEditor.NAVBAR_HOME));
+        dumpButton(pw, "rcnt", findButton(NavbarEditor.NAVBAR_RECENT));
         dumpButton(pw, "srch", getSearchLight());
         dumpButton(pw, "cmra", getCameraButton());
 
@@ -775,5 +901,83 @@ public class NavigationBarView extends LinearLayout implements NavigationCallbac
             }
         }
         pw.println();
+    }
+
+    private static Bundle getApplicationMetadata(Context context, String pkg) {
+        if (pkg != null) {
+            try {
+                PackageManager pm = context.getPackageManager();
+                ApplicationInfo ai = pm.getApplicationInfo(pkg, PackageManager.GET_META_DATA);
+                return ai.metaData;
+            } catch (NameNotFoundException e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private class SettingsObserver extends ContentObserver {
+        private boolean mObserving = false;
+
+        SettingsObserver(Handler handler) {
+            super(handler);
+        }
+
+        void observe() {
+            mObserving = true;
+            ContentResolver resolver = mContext.getContentResolver();
+            resolver.registerContentObserver(
+                Settings.System.getUriFor(Settings.System.LOCKSCREEN_MODLOCK_ENABLED),
+                false, this);
+            resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.NAVIGATION_BAR_MENU_ARROW_KEYS),
+                    false, this);
+            resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.NAV_BUTTONS),
+                    false, this);
+
+            // intialize mModlockDisabled
+            onChange(false);
+        }
+
+        void unobserve() {
+            if (mObserving) {
+                mContext.getContentResolver().unregisterContentObserver(this);
+                mObserving = false;
+            }
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            if (mHasCmKeyguard) {
+                mModLockDisabled = Settings.System.getInt(mContext.getContentResolver(),
+                        Settings.System.LOCKSCREEN_MODLOCK_ENABLED, 1) == 0;
+            } else {
+                mModLockDisabled = true;
+            }
+            mShowDpadArrowKeys = Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.NAVIGATION_BAR_MENU_ARROW_KEYS, 1) != 0;
+
+            // hide dpad keys
+            setVisibleOrGone(getCurrentView().findViewById(R.id.dpad_left), false);
+            setVisibleOrGone(getCurrentView().findViewById(R.id.dpad_right), false);
+
+            // restore previous views in case the cursor keys WERE showing and
+            // are should now be hidden while the IME is up.
+            View one = getCurrentView().findViewById(mVertical ? R.id.six : R.id.one);
+            View capricaSix = getCurrentView().findViewById(mVertical ? R.id.one : R.id.six);
+            if (mSlotOneVisibility != -1 && one != null) {
+                one.setVisibility(mSlotOneVisibility);
+            }
+            if (mSlotSixVisibility != -1 && capricaSix != null) {
+                capricaSix.setVisibility(mSlotSixVisibility);
+            }
+            mSlotOneVisibility = -1;
+            mSlotSixVisibility = -1;
+
+            // propogate settings
+            setNavigationIconHints(mNavigationIconHints, true);
+        }
     }
 }

@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.provider.Settings;
+import android.util.DisplayMetrics;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -34,6 +35,8 @@ public class QuickSettingsTile implements OnClickListener {
     protected final int mTileLayout;
     protected int mDrawable;
     protected String mLabel;
+    protected int mTileTextSize;
+    protected int mTileTextPadding;
     protected PhoneStatusBar mStatusbarService;
     protected QuickSettingsController mQsc;
     protected SharedPreferences mPrefs;
@@ -54,6 +57,9 @@ public class QuickSettingsTile implements OnClickListener {
 
     public void setupQuickSettingsTile(LayoutInflater inflater,
             QuickSettingsContainerView container) {
+        container.updateResources();
+        mTileTextSize = container.getTileTextSize();
+        mTileTextPadding = container.getTileTextPadding();
         mTile = (QuickSettingsTileView) inflater.inflate(
                 R.layout.quick_settings_tile, container, false);
         mTile.setContent(mTileLayout, inflater);
@@ -66,11 +72,11 @@ public class QuickSettingsTile implements OnClickListener {
     }
 
     public void switchToRibbonMode() {
-        TextView tv = (TextView) mTile.findViewById(R.id.text);
+        TextView tv = getLabelView();
         if (tv != null) {
             tv.setVisibility(View.GONE);
         }
-        View image = mTile.findViewById(R.id.image);
+        View image = getImageView();
         if (image != null) {
             MarginLayoutParams params = (MarginLayoutParams) image.getLayoutParams();
             int margin = mContext.getResources().getDimensionPixelSize(
@@ -78,6 +84,26 @@ public class QuickSettingsTile implements OnClickListener {
             params.topMargin = params.bottomMargin = margin;
             image.setLayoutParams(params);
         }
+    }
+
+    public void switchToSmallIcons() {
+        TextView tv = getLabelView();
+        if (tv != null) {
+            tv.setText(mLabel);
+            tv.setTextSize(mTileTextSize);
+            int dpi = mContext.getResources().getDisplayMetrics().densityDpi;
+            if (dpi > DisplayMetrics.DENSITY_HIGH) {
+                tv.setPadding(0, mTileTextPadding, 0, 0);
+            }
+        }
+    }
+
+    protected View getImageView() {
+        return mTile.findViewById(R.id.image);
+    }
+
+    protected TextView getLabelView() {
+        return (TextView) mTile.findViewById(R.id.text);
     }
 
     void onPostCreate() {}
@@ -95,11 +121,16 @@ public class QuickSettingsTile implements OnClickListener {
     }
 
     void updateQuickSettings() {
-        TextView tv = (TextView) mTile.findViewById(R.id.text);
+        TextView tv = getLabelView();
         if (tv != null) {
             tv.setText(mLabel);
+            tv.setTextSize(mTileTextSize);
+            int dpi = mContext.getResources().getDisplayMetrics().densityDpi;
+            if (dpi > DisplayMetrics.DENSITY_HIGH) {
+                tv.setPadding(0, mTileTextPadding, 0, 0);
+            }
         }
-        View image = mTile.findViewById(R.id.image);
+        View image = getImageView();
         if (image != null && image instanceof ImageView) {
             ((ImageView) image).setImageResource(mDrawable);
         }

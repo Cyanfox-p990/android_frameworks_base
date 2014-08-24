@@ -1778,6 +1778,13 @@ public class Intent implements Parcelable, Cloneable {
         "android.intent.action.EXTERNAL_APPLICATIONS_UNAVAILABLE";
 
     /**
+     * Broadcast Action: The current keyguard wallpaper configuration
+     * has changed and should be re-read.
+     * {@hide}
+     */
+    public static final String ACTION_KEYGUARD_WALLPAPER_CHANGED =
+            "android.intent.action.KEYGUARD_WALLPAPER_CHANGED";
+    /**
      * Broadcast Action:  The current system wallpaper has changed.  See
      * {@link android.app.WallpaperManager} for retrieving the new wallpaper.
      * This should <em>only</em> be used to determine when the wallpaper
@@ -2182,6 +2189,19 @@ public class Intent implements Parcelable, Cloneable {
     @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
     public static final String ACTION_HEADSET_PLUG =
             "android.intent.action.HEADSET_PLUG";
+
+    /**
+     * Broadcast Action: WiFi Display video is enabled or disabled
+     *
+     * <p>The intent will have the following extra values:
+     * <ul>
+     *   <li><em>state</em> - 0 for disabled, 1 for enabled. </li>
+     * </ul>
+     * @hide
+     */
+
+    public static final String ACTION_WIFI_DISPLAY_VIDEO =
+            "org.codeaurora.intent.action.WIFI_DISPLAY_VIDEO";
 
     /**
      * Broadcast Action: An analog audio speaker/headset plugged in or unplugged.
@@ -2626,6 +2646,19 @@ public class Intent implements Parcelable, Cloneable {
             "android.intent.action.QUICK_CLOCK";
 
     /**
+     * Broadcast Action: Indicate that unrecoverable error happened during app launch.
+     * Could indicate that curently applied theme is malicious.
+     * @hide
+     */
+    public static final String ACTION_APP_LAUNCH_FAILURE = "com.tmobile.intent.action.APP_LAUNCH_FAILURE";
+
+    /**
+     * Broadcast Action: Request to reset the unrecoverable errors count to 0.
+     * @hide
+     */
+    public static final String ACTION_APP_LAUNCH_FAILURE_RESET = "com.tmobile.intent.action.APP_LAUNCH_FAILURE_RESET";
+
+    /**
      * Broadcast Action: This is broadcast when a user action should request the
      * brightness setting dialog.
      * @hide
@@ -2715,19 +2748,6 @@ public class Intent implements Parcelable, Cloneable {
      */
     @SdkConstant(SdkConstantType.ACTIVITY_INTENT_ACTION)
     public static final String ACTION_CREATE_DOCUMENT = "android.intent.action.CREATE_DOCUMENT";
-
-    /**
-     * Broadcast Action: Indicate that unrecoverable error happened during app launch.
-     * Could indicate that curently applied theme is malicious.
-     * @hide
-     */
-    public static final String ACTION_APP_LAUNCH_FAILURE = "com.tmobile.intent.action.APP_LAUNCH_FAILURE";
-
-    /**
-     * Broadcast Action: Request to reset the unrecoverable errors count to 0.
-     * @hide
-     */
-    public static final String ACTION_APP_LAUNCH_FAILURE_RESET = "com.tmobile.intent.action.APP_LAUNCH_FAILURE_RESET";
 
     // ---------------------------------------------------------------------
     // ---------------------------------------------------------------------
@@ -6181,6 +6201,9 @@ public class Intent implements Parcelable, Cloneable {
      * @see #removeExtra
      */
     public Intent putExtras(Bundle extras) {
+        if (extras == null) {
+            return this;
+        }
         if (mExtras == null) {
             mExtras = new Bundle();
         }

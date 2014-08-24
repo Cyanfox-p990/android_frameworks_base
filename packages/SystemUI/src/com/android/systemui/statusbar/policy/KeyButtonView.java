@@ -26,6 +26,7 @@ import android.graphics.Canvas;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.hardware.input.InputManager;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -51,12 +52,15 @@ public class KeyButtonView extends ImageView {
 
     final float GLOW_MAX_SCALE_FACTOR = 1.8f;
     public static final float DEFAULT_QUIESCENT_ALPHA = 0.70f;
+    public static final int CURSOR_REPEAT_FLAGS = KeyEvent.FLAG_SOFT_KEYBOARD
+            | KeyEvent.FLAG_KEEP_TOUCH_MODE;
 
     long mDownTime;
     int mCode;
     boolean mIsSmall;
     int mTouchSlop;
     Drawable mGlowBG;
+    int mGlowBgId;
     int mGlowWidth, mGlowHeight;
     float mGlowAlpha = 0f, mGlowScale = 1f;
     @ViewDebug.ExportedProperty(category = "drawing")
@@ -69,11 +73,19 @@ public class KeyButtonView extends ImageView {
     AnimatorSet mPressedAnim;
     Animator mAnimateToQuiescent = new ObjectAnimator();
 
+    private PowerManager mPm;
+
     Runnable mCheckLongPress = new Runnable() {
         public void run() {
             if (isPressed()) {
                 // Log.d("KeyButtonView", "longpressed: " + this);
-                if (mCode != 0) {
+                if (mCode == KeyEvent.KEYCODE_DPAD_LEFT || mCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    sendEvent(KeyEvent.ACTION_UP, CURSOR_REPEAT_FLAGS,
+                            System.currentTimeMillis(), false);
+                    sendEvent(KeyEvent.ACTION_DOWN, CURSOR_REPEAT_FLAGS,
+                            System.currentTimeMillis(), false);
+                    postDelayed(mCheckLongPress, ViewConfiguration.getKeyRepeatDelay());
+                } else if (mCode != 0) {
                     sendEvent(KeyEvent.ACTION_DOWN, KeyEvent.FLAG_LONG_PRESS);
                     sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_LONG_CLICKED);
                 } else {
@@ -97,6 +109,7 @@ public class KeyButtonView extends ImageView {
         mCode = a.getInteger(R.styleable.KeyButtonView_keyCode, 0);
         mSupportsLongPress = a.getBoolean(R.styleable.KeyButtonView_keyRepeat, true);
 
+        mGlowBgId = a.getResourceId(R.styleable.KeyButtonView_glowBackground, 0);
         mGlowBG = a.getDrawable(R.styleable.KeyButtonView_glowBackground);
         setDrawingAlpha(mQuiescentAlpha);
         if (mGlowBG != null) {
@@ -108,6 +121,13 @@ public class KeyButtonView extends ImageView {
 
         setClickable(true);
         mTouchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+        mPm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+    }
+
+    public void updateResources(Resources res) {
+        if (mGlowBgId != 0) {
+            mGlowBG = res.getDrawable(mGlowBgId);
+        }
     }
 
     @Override
@@ -208,6 +228,10 @@ public class KeyButtonView extends ImageView {
     public void setPressed(boolean pressed) {
         if (mGlowBG != null) {
             if (pressed != isPressed()) {
+
+                // A lot of stuff is about to happen. Lets get ready.
+                mPm.cpuBoost(750000);
+
                 if (mPressedAnim != null && mPressedAnim.isRunning()) {
                     mPressedAnim.cancel();
                 }
@@ -298,7 +322,10 @@ public class KeyButtonView extends ImageView {
                 //Log.d("KeyButtonView", "press");
                 mDownTime = SystemClock.uptimeMillis();
                 setPressed(true);
-                if (mCode != 0) {
+                if (mCode == KeyEvent.KEYCODE_DPAD_LEFT || mCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    sendEvent(KeyEvent.ACTION_DOWN, KeyEvent.FLAG_VIRTUAL_HARD_KEY
+                            | KeyEvent.FLAG_KEEP_TOUCH_MODE, mDownTime, false);
+                } else if (mCode != 0) {
                     sendEvent(KeyEvent.ACTION_DOWN, 0, mDownTime);
                 } else {
                     // Provide the same haptic feedback that the system offers for virtual keys.
@@ -357,10 +384,17 @@ public class KeyButtonView extends ImageView {
     }
 
     void sendEvent(int action, int flags, long when) {
+        sendEvent(action, flags, when, true);
+    }
+
+    void sendEvent(int action, int flags, long when, boolean applyDefaultFlags) {
         final int repeatCount = (flags & KeyEvent.FLAG_LONG_PRESS) != 0 ? 1 : 0;
+        if (applyDefaultFlags) {
+            flags |= KeyEvent.FLAG_FROM_SYSTEM | KeyEvent.FLAG_VIRTUAL_HARD_KEY;
+        }
         final KeyEvent ev = new KeyEvent(mDownTime, when, action, mCode, repeatCount,
                 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-                flags | KeyEvent.FLAG_FROM_SYSTEM | KeyEvent.FLAG_VIRTUAL_HARD_KEY,
+                flags,
                 InputDevice.SOURCE_KEYBOARD);
         InputManager.getInstance().injectInputEvent(ev,
                 InputManager.INJECT_INPUT_EVENT_MODE_ASYNC);

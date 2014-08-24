@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
+ * Not a Contribution.
  * Copyright (C) 2006 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1798,7 +1800,7 @@ public abstract class Context {
      * @hide like {@link #stopService(Intent)} but for a specific user.
      */
     public abstract boolean stopServiceAsUser(Intent service, UserHandle user);
-    
+
     /**
      * Connect to an application service, creating it if needed.  This defines
      * a dependency between your application and the service.  The given
@@ -2275,6 +2277,17 @@ public abstract class Context {
 
     /**
      * Use with {@link #getSystemService} to retrieve a
+     * {android.telephony.MSimTelephonyManager} for handling the management
+     * of the telephony features of the multi sim device.
+     *
+     * @see #getSystemService
+     * @see android.telephony.MSimTelephonyManager
+     * @hide
+     */
+    public static final String MSIM_TELEPHONY_SERVICE = "phone_msim";
+
+    /**
+     * Use with {@link #getSystemService} to retrieve a
      * {@link android.text.ClipboardManager} for accessing and modifying
      * the contents of the global clipboard.
      *
@@ -2475,6 +2488,26 @@ public abstract class Context {
      * @hide
      */
     public static final String BATTERY_SERVICE = "battery";
+
+    /**
+     * Use with {@link #getSystemService} to retrieve a
+     * {@link android.content.res.ThemeManager} for accessing theme service.
+     *
+     * @see #getSystemService
+     * @see android.content.res.ThemeManager
+     * @hide
+     */
+    public static final String THEME_SERVICE = "themes";
+
+    /**
+     * Use with {@link #getSystemService} to retrieve a
+     * {@link com.android.server.TorchService} for accessing torch service.
+     *
+     * @see #getSystemService
+     * @see com.android.server.TorchService
+     * @hide
+     */
+    public static final String TORCH_SERVICE = "torch";
 
     /**
      * Determine whether the given permission is allowed for a particular
@@ -2887,6 +2920,18 @@ public abstract class Context {
      */
     public abstract Context createPackageContextAsUser(
             String packageName, int flags, UserHandle user)
+            throws PackageManager.NameNotFoundException;
+
+    /**
+     * Similar to {@link #createPackageContext(String, int)}, but with a
+     * different {@link UserHandle}. For example, {@link #getContentResolver()}
+     * will open any {@link Uri} as the given user.  A theme package can be
+     * specified which will be used when adding resources to this context
+     *
+     * @hide
+     */
+    public abstract Context createPackageContextAsUser(
+            String packageName, String themePackageName, int flags, UserHandle user)
             throws PackageManager.NameNotFoundException;
 
     /**

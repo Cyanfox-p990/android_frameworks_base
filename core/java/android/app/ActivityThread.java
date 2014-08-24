@@ -39,14 +39,13 @@ import android.content.pm.ServiceInfo;
 import android.content.res.AssetManager;
 import android.content.res.CompatibilityInfo;
 import android.content.res.Configuration;
-import android.content.res.CustomTheme;
-import android.content.res.PackageRedirectionMap;
 import android.content.res.Resources;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteDebug;
 import android.database.sqlite.SQLiteDebug.DbStats;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Typeface;
 import android.hardware.display.DisplayManagerGlobal;
 import android.net.IConnectivityManager;
 import android.net.Proxy;
@@ -1538,11 +1537,20 @@ public final class ActivityThread {
     /**
      * Creates the top level resources for the given package.
      */
-    Resources getTopLevelResources(String resDir,
+    Resources getTopLevelResources(String resDir, String[] overlayDirs,
             int displayId, Configuration overrideConfiguration,
-            LoadedApk pkgInfo) {
-        return mResourcesManager.getTopLevelResources(resDir, displayId, overrideConfiguration,
-                pkgInfo.getCompatibilityInfo(), null);
+            LoadedApk pkgInfo, Context context, String pkgName) {
+        return mResourcesManager.getTopLevelResources(resDir, overlayDirs, displayId, pkgName,
+                overrideConfiguration, pkgInfo.getCompatibilityInfo(), null, context);
+    }
+
+    /**
+     * Creates the top level resources for the given package.
+     */
+    Resources getTopLevelThemedResources(String resDir, int displayId, LoadedApk pkgInfo,
+                                         String pkgName, String themePkgName) {
+        return mResourcesManager.getTopLevelThemedResources(resDir, displayId, pkgName,
+                themePkgName, pkgInfo.getCompatibilityInfo(), null);
     }
 
     final Handler getHandler() {
@@ -1647,15 +1655,14 @@ public final class ActivityThread {
                 ref = mResourcePackages.get(aInfo.packageName);
             }
             LoadedApk packageInfo = ref != null ? ref.get() : null;
-            if (packageInfo == null || (packageInfo.mResources != null
-                    && !packageInfo.mResources.getAssets().isUpToDate())) {
+            if (packageInfo == null) {
                 if (localLOGV) Slog.v(TAG, (includeCode ? "Loading code package "
                         : "Loading resource-only package ") + aInfo.packageName
                         + " (in " + (mBoundApplication != null
                                 ? mBoundApplication.processName : null)
                         + ")");
                 packageInfo =
-                    new LoadedApk(this, aInfo, compatInfo, this, baseLoader,
+                    new LoadedApk(this, aInfo, compatInfo, baseLoader,
                             securityViolation, includeCode &&
                             (aInfo.flags&ApplicationInfo.FLAG_HAS_CODE) != 0);
                 if (includeCode) {
@@ -1665,6 +1672,10 @@ public final class ActivityThread {
                     mResourcePackages.put(aInfo.packageName,
                             new WeakReference<LoadedApk>(packageInfo));
                 }
+            }
+            if (packageInfo.mResources != null
+                    && !packageInfo.mResources.getAssets().isUpToDate()) {
+                packageInfo.mResources = null;
             }
             return packageInfo;
         }
@@ -1708,26 +1719,15 @@ public final class ActivityThread {
     public ContextImpl getSystemContext() {
         synchronized (this) {
             if (mSystemContext == null) {
-                ContextImpl context =
-                    ContextImpl.createSystemContext(this);
-                LoadedApk info = new LoadedApk(this, "android", context, null,
-                        CompatibilityInfo.DEFAULT_COMPATIBILITY_INFO);
-                context.init(info, null, this);
-                context.getResources().updateConfiguration(mResourcesManager.getConfiguration(),
-                        mResourcesManager.getDisplayMetricsLocked(Display.DEFAULT_DISPLAY));
-                mSystemContext = context;
-                //Slog.i(TAG, "Created system resources " + context.getResources()
-                //        + ": " + context.getResources().getConfiguration());
+                mSystemContext = ContextImpl.createSystemContext(this);
             }
+            return mSystemContext;
         }
-        return mSystemContext;
     }
 
     public void installSystemApplicationInfo(ApplicationInfo info) {
         synchronized (this) {
-            ContextImpl context = getSystemContext();
-            context.init(new LoadedApk(this, "android", context, info,
-                    CompatibilityInfo.DEFAULT_COMPATIBILITY_INFO), null, this);
+            getSystemContext().installSystemApplicationInfo(info);
 
             // give ourselves a default profiler
             mProfiler = new Profiler();
@@ -2223,8 +2223,7 @@ public final class ActivityThread {
 
     private Context createBaseContextForActivity(ActivityClientRecord r,
             final Activity activity) {
-        ContextImpl appContext = new ContextImpl();
-        appContext.init(r.packageInfo, r.token, this);
+        ContextImpl appContext = ContextImpl.createActivityContext(this, r.packageInfo, r.token);
         appContext.setOuterContext(activity);
 
         // For debugging purposes, if the activity's package name contains the value of
@@ -2509,8 +2508,7 @@ public final class ActivityThread {
                 agent = (BackupAgent) cl.loadClass(classname).newInstance();
 
                 // set up the agent's context
-                ContextImpl context = new ContextImpl();
-                context.init(packageInfo, null, this);
+                ContextImpl context = ContextImpl.createAppContext(this, packageInfo);
                 context.setOuterContext(agent);
                 agent.attach(context);
 
@@ -2582,11 +2580,10 @@ public final class ActivityThread {
         try {
             if (localLOGV) Slog.v(TAG, "Creating service " + data.info.name);
 
-            ContextImpl context = new ContextImpl();
-            context.init(packageInfo, null, this);
+            ContextImpl context = ContextImpl.createAppContext(this, packageInfo);
+            context.setOuterContext(service);
 
             Application app = packageInfo.makeApplication(false, mInstrumentation);
-            context.setOuterContext(service);
             service.attach(context, this, data.info.name, data.token, app,
                     ActivityManagerNative.getDefault());
             service.onCreate();
@@ -3961,8 +3958,10 @@ public final class ActivityThread {
         if (configDiff != 0) {
             // Ask text layout engine to free its caches if there is a locale change
             boolean hasLocaleConfigChange = ((configDiff & ActivityInfo.CONFIG_LOCALE) != 0);
-            if (hasLocaleConfigChange) {
+            boolean hasThemeConfigChange = ((configDiff & ActivityInfo.CONFIG_THEME_RESOURCE) != 0);
+            if (hasLocaleConfigChange || hasThemeConfigChange) {
                 Canvas.freeTextLayoutCaches();
+                Typeface.recreateDefaults();
                 if (DEBUG_CONFIGURATION) Slog.v(TAG, "Cleared TextLayout Caches");
             }
         }
@@ -4126,6 +4125,63 @@ public final class ActivityThread {
         }
     }
 
+    /*
+     * Parse a string of the form /[0-9]+[kKmMgG]?/, which is used to
+     * specify memory sizes.  [kK] indicates kilobytes, [mM] megabytes, and
+     * [gG] gigabytes.
+     *
+     * The spec says the -Xmx and -Xms options must be multiples of 1024.
+     * It doesn't say anything about -Xss.
+     *
+     * Returns 0 (a useless size) if "s" is malformed or specifies a low or
+     * non-evenly-divisible value.
+     */
+    private int parseMemOption(String s){
+        if( s.equals("") ){
+            return 0;
+        }
+
+        char lastChar = s.charAt(s.length()-1);
+        int value = 0;
+        if( lastChar == 'k' || lastChar == 'K' || lastChar == 'm' ||
+                lastChar == 'M' || lastChar == 'g' || lastChar == 'G' ) {
+
+            try{
+                value = Integer.parseInt(s.substring(0, s.length()-1));
+            } catch (Exception e){
+                throw new RuntimeException(
+                        "Invalid memory option value:" + s, e);
+            }
+            if( value != 0 ){
+                if( lastChar == 'k' || lastChar == 'K' ){
+                    value *= 1024;
+                }
+                if( lastChar == 'm' || lastChar == 'M' ){
+                    value *= 1024*1024;
+                }
+                if( lastChar == 'g' || lastChar == 'G' ){
+                    if(value>4){
+                        throw new RuntimeException(
+                                "Currently only support less than 4G in value:" + s);
+                    }
+                    value *= 1024*1024*1024;
+                }
+            }
+        } else {
+            try{
+                value = Integer.parseInt(s);
+            } catch  (Exception e){
+                throw new RuntimeException(
+                        "Invalid memory option value:" + s, e);
+            }
+        }
+        if( value % 1024 != 0 ){
+            throw new RuntimeException(
+                    "Invalid memory option value, must be multiples of 1024:" + s);
+        }
+        return value;
+    }
+
     private void handleBindApplication(AppBindData data) {
         mBoundApplication = data;
         mConfiguration = new Configuration(data.config);
@@ -4139,21 +4195,25 @@ public final class ActivityThread {
         // send up app name; do this *before* waiting for debugger
         Process.setArgV0(data.processName);
 
-        String str  = SystemProperties.get("dalvik.vm.heaputilization", "" );
+        Log.d(TAG, "handleBindApplication:" + data.processName );
+
+        String str  = SystemProperties.get("dalvik.vm.heaptargetutilization", "" );
         if( !str.equals("") ){
             float heapUtil = Float.valueOf(str.trim()).floatValue();
             VMRuntime.getRuntime().setTargetHeapUtilization(heapUtil);
-            Log.d(TAG, "setTargetHeapUtilization:" + str );
+            Log.d(TAG, "setTargetHeapUtilization:" + heapUtil );
         }
-        int heapMinFree  = SystemProperties.getInt("dalvik.vm.heapMinFree", 0 );
-        if( heapMinFree > 0 ){
-            VMRuntime.getRuntime().setTargetHeapMinFree(heapMinFree);
-            Log.d(TAG, "setTargetHeapMinFree:" + heapMinFree );
+        String heapMinFree = SystemProperties.get("dalvik.vm.heapminfree", "" );
+        int minfree =  parseMemOption(heapMinFree);
+        if( minfree > 0){
+            VMRuntime.getRuntime().setTargetHeapMinFree(minfree);
+            Log.d(TAG, "setTargetHeapMinFree:" + minfree );
         }
-        int heapConcurrentStart  = SystemProperties.getInt("dalvik.vm.heapconcurrentstart", 0 );
-        if( heapConcurrentStart > 0 ){
-            VMRuntime.getRuntime().setTargetHeapConcurrentStart(heapConcurrentStart);
-            Log.d(TAG, "setTargetHeapConcurrentStart:" + heapConcurrentStart );
+        String heapConcurrentStart  = SystemProperties.get("dalvik.vm.heapconcurrentstart", "" );
+        int concurr_start =  parseMemOption(heapConcurrentStart);
+        if( concurr_start > 0){
+            VMRuntime.getRuntime().setTargetHeapConcurrentStart(concurr_start);
+            Log.d(TAG, "setTargetHeapConcurrentStart:" + concurr_start );
         }
 
         ////
@@ -4226,8 +4286,7 @@ public final class ActivityThread {
         }
         updateDefaultDensity();
 
-        final ContextImpl appContext = new ContextImpl();
-        appContext.init(data.info, null, this);
+        final ContextImpl appContext = ContextImpl.createAppContext(this, data.info);
         if (!Process.isIsolated()) {
             final File cacheDir = appContext.getCacheDir();
 
@@ -4338,8 +4397,7 @@ public final class ActivityThread {
             instrApp.nativeLibraryDir = ii.nativeLibraryDir;
             LoadedApk pi = getPackageInfo(instrApp, data.compatInfo,
                     appContext.getClassLoader(), false, true);
-            ContextImpl instrContext = new ContextImpl();
-            instrContext.init(pi, null, this);
+            ContextImpl instrContext = ContextImpl.createAppContext(this, pi);
 
             try {
                 java.lang.ClassLoader cl = instrContext.getClassLoader();
@@ -4954,8 +5012,8 @@ public final class ActivityThread {
                                                     UserHandle.myUserId());
             try {
                 mInstrumentation = new Instrumentation();
-                ContextImpl context = new ContextImpl();
-                context.init(getSystemContext().mPackageInfo, null, this);
+                ContextImpl context = ContextImpl.createAppContext(
+                        this, getSystemContext().mPackageInfo);
                 Application app = Instrumentation.newApplication(Application.class, context);
                 mAllApplications.add(app);
                 mInitialApplication = app;

@@ -6550,7 +6550,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
      * @attr ref android.R.styleable#View_filterTouchesWhenObscured
      */
     public void setFilterTouchesWhenObscured(boolean enabled) {
-        setFlags(enabled ? 0 : FILTER_TOUCHES_WHEN_OBSCURED,
+        setFlags(enabled ? FILTER_TOUCHES_WHEN_OBSCURED : 0,
                 FILTER_TOUCHES_WHEN_OBSCURED);
     }
 
@@ -13152,6 +13152,23 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
 
                 invalidate(true);
                 invalidateParentCaches();
+            } else if (info != null && info.mHardwareRenderer != null) {
+                // If fall into this path, means the hardware render has
+                // already been disabled. Destroy it in a safely context
+                // to avoid random UI corruption
+                info.mHardwareRenderer.safelyRun(new Runnable() {
+                    @Override
+                    public void run() {
+                        // cancelLayerUpdate() is not called here because the
+                        // glCanvas is null when HardwareRender is disabled
+                        // cancelLayerUpdate is actually done in the glCanvas.
+                        mHardwareLayer.destroy();
+                        mHardwareLayer = null;
+
+                        invalidate(true);
+                        invalidateParentCaches();
+                    }
+                });
             }
             return true;
         }

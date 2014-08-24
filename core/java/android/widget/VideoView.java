@@ -386,7 +386,7 @@ public class VideoView extends SurfaceView
     private boolean isHTTPStreaming(Uri mUri) {
         if (mUri != null) {
             String scheme = mUri.toString();
-            if (scheme.startsWith("http://") || scheme.startsWith("http://")) {
+            if (scheme.startsWith("http://") || scheme.startsWith("https://")) {
                 if (scheme.endsWith(".m3u8") || scheme.endsWith(".m3u")
                     || scheme.contains("m3u8") || scheme.endsWith(".mpd")) {
                     // HLS or DASH streaming source
@@ -426,6 +426,7 @@ public class VideoView extends SurfaceView
                         || data.getBoolean(Metadata.SEEK_BACKWARD_AVAILABLE);
                 mCanSeekForward = !data.has(Metadata.SEEK_FORWARD_AVAILABLE)
                         || data.getBoolean(Metadata.SEEK_FORWARD_AVAILABLE);
+                data.recycleParcel();
             } else {
                 mCanPause = mCanSeekBack = mCanSeekForward = true;
             }

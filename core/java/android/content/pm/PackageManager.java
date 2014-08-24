@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
- * This code has been modified.  Portions copyright (C) 2010, T-Mobile USA, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -576,6 +575,14 @@ public abstract class PackageManager {
     public static final int INSTALL_FAILED_VERSION_DOWNGRADE = -25;
 
     /**
+     * Installation return code: this is passed to the {@link IPackageInstallObserver} by
+     * {@link #installPackage(android.net.Uri, IPackageInstallObserver, int)} if
+     * the package is from unknown sources but not trusted sources.
+     * @hide
+     */
+    public static final int INSTALL_FAILED_UNKNOWN_SOURCES = -26;
+
+    /**
      * Installation parse return code: this is passed to the {@link IPackageInstallObserver} by
      * {@link #installPackage(android.net.Uri, IPackageInstallObserver, int)}
      * if the parser was given a path that is not a file, or does not end with the expected
@@ -674,6 +681,35 @@ public abstract class PackageManager {
      * @hide
      */
     public static final int INSTALL_FAILED_USER_RESTRICTED = -111;
+
+    /**
+     * Used by themes
+     * Installation failed return code: this is passed to the {@link IPackageInstallObserver} by
+     * {@link #installPackage(android.net.Uri, IPackageInstallObserver, int)}
+     * if the system failed to install the theme because aapt could not compile the app
+     * @hide
+     */
+    public static final int INSTALL_FAILED_THEME_AAPT_ERROR = -400;
+
+    /**
+     * Used by themes
+     * Installation failed return code: this is passed to the {@link IPackageInstallObserver} by
+     * {@link #installPackage(android.net.Uri, IPackageInstallObserver, int)}
+     * if the system failed to install the theme because idmap failed
+     * apps.
+     * @hide
+     */
+    public static final int INSTALL_FAILED_THEME_IDMAP_ERROR = -401;
+
+    /**
+     * Used by themes
+     * Installation failed return code: this is passed to the {@link IPackageInstallObserver} by
+     * {@link #installPackage(android.net.Uri, IPackageInstallObserver, int)}
+     * if the system failed to install the theme for an unknown reason
+     * apps.
+     * @hide
+     */
+    public static final int INSTALL_FAILED_THEME_UNKNOWN_ERROR = -402;
 
     /**
      * Flag parameter for {@link #deletePackage} to indicate that you don't want to delete the
@@ -1339,6 +1375,22 @@ public abstract class PackageManager {
             = "android.content.pm.extra.PERMISSION_LIST";
 
     /**
+     * Flag for {@link #setComponentProtectedSetting(android.content.ComponentName, boolean)}:
+     * This component or application has set to protected status
+     *
+     * @hide
+     */
+    public static final boolean COMPONENT_PROTECTED_STATUS = false;
+
+    /**
+     * Flag for {@link #setComponentProtectedSetting(android.content.ComponentName, boolean)}:
+     * This component or application has been explicitly set to visible status
+     *
+     * @hide
+     */
+    public static final boolean COMPONENT_VISIBLE_STATUS = true;
+
+    /**
      * Retrieve overall information about an application package that is
      * installed on the system.
      * <p>
@@ -1734,17 +1786,6 @@ public abstract class PackageManager {
      * @hide
      */
     public abstract List<PackageInfo> getInstalledPackages(int flags, int userId);
-
-    /**
-     * Return a List of all theme packages that are installed
-     * on the device.
-     *
-     * @return A List of PackageInfo objects, one for each theme package
-     *         that is installed on the device.
-     *
-     * @hide
-     */
-    public abstract List<PackageInfo> getInstalledThemePackages();
 
     /**
      * Check whether a particular package has been granted a particular
@@ -2594,6 +2635,18 @@ public abstract class PackageManager {
     public abstract Resources getResourcesForApplicationAsUser(String appPackageName, int userId)
             throws NameNotFoundException;
 
+    /** @hide */
+    public abstract Resources getThemedResourcesForApplication(ApplicationInfo app,
+            String themePkgName) throws NameNotFoundException;
+
+    /** @hide */
+    public abstract Resources getThemedResourcesForApplication(String appPackageName,
+            String themePkgName) throws NameNotFoundException;
+
+    /** @hide */
+    public abstract Resources getThemedResourcesForApplicationAsUser(String appPackageName,
+            String themePkgName, int userId) throws NameNotFoundException;
+
     /**
      * Retrieve overall information about an application package defined
      * in a package archive file
@@ -3230,4 +3283,16 @@ public abstract class PackageManager {
         return Environment.getDataDirectory().toString() + "/user/" + userId
                 + "/" + packageName;
     }
+
+    /**
+     * Updates the theme icon res id for the new theme
+     * @hide
+     */
+    public abstract void updateIconMaps(String pkgName);
+
+    /**
+     * Update Component protection state
+     * @hide
+     */
+    public abstract void setComponentProtectedSetting(ComponentName componentName, boolean newState);
 }

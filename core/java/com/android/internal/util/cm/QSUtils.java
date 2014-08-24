@@ -8,6 +8,8 @@ import android.content.res.Resources;
 import android.hardware.Camera;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.WifiDisplayStatus;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
 import android.net.ConnectivityManager;
 import android.nfc.NfcAdapter;
 import android.os.BatteryManager;
@@ -56,7 +58,7 @@ public class QSUtils {
 
         public static boolean expandedDesktopEnabled(ContentResolver resolver) {
             return Settings.System.getIntForUser(resolver, Settings.System.EXPANDED_DESKTOP_STYLE,
-                    0, UserHandle.USER_CURRENT_OR_SELF) != 0;
+                    2, UserHandle.USER_CURRENT_OR_SELF) != 0;
         }
 
         public static boolean deviceSupportsNfc(Context ctx) {
@@ -87,5 +89,11 @@ public class QSUtils {
 
         public static boolean adbEnabled(ContentResolver resolver) {
             return (Settings.Global.getInt(resolver, Settings.Global.ADB_ENABLED, 0)) == 1;
+        }
+
+        public static boolean deviceSupportsCompass(Context context) {
+            SensorManager sm = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+            return (sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null
+                    && sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD) != null);
         }
 }
